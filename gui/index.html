@@ -186,10 +186,10 @@ let csiData = { motion: false, score: 0, threshold: 9.6 };
 // Direct ESP32 connection - no bridge needed
 let animationId = null;
 
-// CALIBRATION - dynamisk baseline
+// CALIBRATION - dynamic baseline
 let calibration = {
-  baseline: 1.2,       // Default for nuvarande miljo
-  threshold: 0.5,      // Liten marginal - kansligare
+  baseline: 1.2,       // Default for current environment
+  threshold: 0.5,      // Small margin - more sensitive
   baseThreshold: 0.5,
   isCalibrating: false,
   samples: [],
@@ -201,14 +201,14 @@ let lastFrameData = null;
 let frameBuffer = [];
 const MAX_BUFFER = 30;
 
-// SPATIAL ZONES - skalbart för fler noder
-// Med 1 nod: hela bilden
-// Med fler noder: dela upp i sektioner
+// SPATIAL ZONES - scalable for multiple nodes
+// With 1 node: full image
+// With more nodes: divide into sections
 const zones = [
   { id: 0, name: 'full', x: 0, y: 0, w: 1, h: 1, intensity: 0 }
 ];
 
-// Aktuell glitch-intensitet (0-200)
+// Current glitch intensity (0-200)
 let currentGlitch = 0;
 
 // Settings
@@ -241,17 +241,17 @@ function connectCSI() {
       document.getElementById('csi-status').style.color = '#f00';
     }
   }
-  setInterval(poll, 30);  // Snabbare polling for battre respons
+  setInterval(poll, 30);  // Fast polling for better response
   poll();
 }
 
-// Gemensam UI-uppdatering
+// Shared UI update
 function updateCSI() {
-  // Samla samples under kalibrering
+  // Collect samples during calibration
   if (calibration.isCalibrating) {
     calibration.samples.push(csiData.score);
     const progress = Math.round((calibration.samples.length / calibration.sampleCount) * 100);
-    document.getElementById('calibrate-status').textContent = `${progress}% - sitt stilla...`;
+    document.getElementById('calibrate-status').textContent = `${progress}% - hold still...`;
 
     if (calibration.samples.length >= calibration.sampleCount) {
       finishCalibration();
@@ -272,10 +272,10 @@ function updateCSI() {
   }
   document.getElementById('score-value').textContent = csiData.score.toFixed(2);
 
-  // Calculate target glitch - skalat for laga varden
+  // Calculate target glitch - scaled for low values
   const scoreAboveBaseline = Math.max(0, csiData.score - calibration.baseline);
   if (scoreAboveBaseline > calibration.threshold) {
-    const normalizedScore = Math.min(scoreAboveBaseline / 2, 1);  // Full effekt vid +2
+    const normalizedScore = Math.min(scoreAboveBaseline / 2, 1);  // Full effect at +2
     targetGlitch = 60 + normalizedScore * 140;
   } else {
     targetGlitch = 0;
@@ -288,26 +288,26 @@ function startCalibration() {
   calibration.samples = [];
   document.getElementById('calibrate-btn').disabled = true;
   document.getElementById('calibrate-btn').textContent = 'Calibrating...';
-  document.getElementById('calibrate-status').textContent = 'Sitt stilla!';
+  document.getElementById('calibrate-status').textContent = 'Hold still!';
 }
 
 function finishCalibration() {
   calibration.isCalibrating = false;
 
-  // Räkna ut medelvärde
+  // Calculate mean
   const sum = calibration.samples.reduce((a, b) => a + b, 0);
   const mean = sum / calibration.samples.length;
 
-  // Räkna ut standardavvikelse för smart threshold
+  // Calculate standard deviation for smart threshold
   const variance = calibration.samples.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / calibration.samples.length;
   const stdDev = Math.sqrt(variance);
 
-  // Sätt baseline och threshold (enkel: baseline + 4 som original)
+  // Set baseline and threshold (simple: baseline + 4 as original)
   calibration.baseline = mean;
   calibration.baseThreshold = 4;
   calibration.threshold = calibration.baseThreshold;
 
-  // Uppdatera UI
+  // Update UI
   document.getElementById('baseline-value').textContent = calibration.baseline.toFixed(1);
   document.getElementById('threshold-value').textContent = '+' + calibration.threshold.toFixed(1);
   document.getElementById('calibrate-btn').disabled = false;
@@ -361,17 +361,17 @@ document.getElementById('video-input').addEventListener('change', (e) => {
   }
 });
 
-// CRT MAGNETISK STÖRNING MED AUTO-MASKER
-// Detekterar kanter i videon och applicerar störning på dem
+// CRT MAGNETIC DISTORTION WITH AUTO-MASKS
+// Detects edges in the video and applies distortion to them
 let time = 0;
 let edgeMask = null;
 
-// Sobel kantdetektering - hittar former i bilden
+// Sobel edge detection - finds shapes in the image
 function detectEdges(data, width, height) {
   const gray = new Float32Array(width * height);
   const edges = new Float32Array(width * height);
 
-  // Konvertera till gråskala
+  // Convert to grayscale
   for (let i = 0; i < width * height; i++) {
     const pi = i * 4;
     gray[i] = (data[pi] * 0.299 + data[pi+1] * 0.587 + data[pi+2] * 0.114) / 255;
@@ -406,14 +406,14 @@ function applyGlitch(imageData, intensity) {
   const width = imageData.width;
   const height = imageData.height;
   const power = Math.min(intensity / 60, 2);
-  time += 0.2;  // Snabbare animation
+  time += 0.2;  // Faster animation
 
-  // Detektera kanter varje frame
+  // Detect edges every frame
   edgeMask = detectEdges(data, width, height);
 
   const output = new Uint8ClampedArray(data);
 
-  // Zon för spatial mapping
+  // Zone for spatial mapping
   const zone = zones[0];
   const cx = (zone.x + zone.w / 2) * width;
   const cy = (zone.y + zone.h / 2) * height;
@@ -424,22 +424,22 @@ function applyGlitch(imageData, intensity) {
       const i = (y * width + x) * 4;
       const ei = y * width + x;
 
-      // Avstånd från störningszon
+      // Distance from distortion zone
       const dx = x - cx;
       const dy = y - cy;
       const dist = Math.sqrt(dx * dx + dy * dy);
       const zoneFalloff = Math.max(0, 1 - dist / zoneRadius);
 
-      // Kombinera: zon-position × kant-styrka
+      // Combine: zone position x edge strength
       const edgeStrength = edgeMask[ei] || 0;
       const localPower = power * zoneFalloff * (0.3 + edgeStrength * 0.7);
 
       if (localPower > 0.02) {
-        // === MAGNETISK WARP LÄNGS KANTER ===
+        // === MAGNETIC WARP ALONG EDGES ===
         const angle = Math.atan2(dy, dx);
         const warpAmt = localPower * 20 * (1 + edgeStrength);
 
-        // Vågor som följer kanterna
+        // Waves that follow the edges
         const wave1 = Math.sin(dist * 0.025 + time * 1.5) * warpAmt;
         const wave2 = Math.sin(angle * 4 + time) * warpAmt * 0.4 * edgeStrength;
 
@@ -451,7 +451,7 @@ function applyGlitch(imageData, intensity) {
 
         const si = (Math.floor(srcY) * width + Math.floor(srcX)) * 4;
 
-        // === RGB SEPARATION - starkare på kanter ===
+        // === RGB SEPARATION - stronger on edges ===
         const chromaShift = Math.floor(localPower * 12 * (1 + edgeStrength));
         const rX = Math.min(width - 1, Math.floor(srcX) + chromaShift);
         const bX = Math.max(0, Math.floor(srcX) - chromaShift);
@@ -475,7 +475,7 @@ function applyGlitch(imageData, intensity) {
           output[i + 2] *= (1 - localPower * 0.25);
         }
 
-        // === EDGE GLOW - kanter lyser ===
+        // === EDGE GLOW - edges illuminate ===
         if (edgeStrength > 0.3) {
           const glow = edgeStrength * localPower * 80;
           output[i] = Math.min(255, output[i] + glow);
@@ -483,7 +483,7 @@ function applyGlitch(imageData, intensity) {
           output[i + 2] = Math.min(255, output[i + 2] + glow * 0.6);
         }
 
-        // === NOISE på kanter ===
+        // === NOISE on edges ===
         if (edgeStrength > 0.2 && Math.random() < localPower * 0.15) {
           const n = (Math.random() - 0.5) * 80;
           output[i] = Math.max(0, Math.min(255, output[i] + n));
@@ -500,7 +500,7 @@ function applyGlitch(imageData, intensity) {
     }
   }
 
-  // === HORISONTELL TEARING i zonen ===
+  // === HORIZONTAL TEARING in the zone ===
   const tearLines = Math.floor(power * 5);
   for (let t = 0; t < tearLines; t++) {
     const ty = Math.floor(cy - zoneRadius * 0.4 + Math.random() * zoneRadius * 0.8);
@@ -537,7 +537,7 @@ function startGlitchLoop() {
       return;
     }
 
-    // DIREKT STOPP när motion slutar
+    // IMMEDIATE STOP when motion ends
     if (targetGlitch < 1) {
       glitchIntensity = 0;
       time = 0;
@@ -557,13 +557,13 @@ function startGlitchLoop() {
     // Draw video to canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Apply glitch ENDAST om intensity > 0
+    // Apply glitch ONLY if intensity > 0
     if (glitchIntensity > 5) {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const glitched = applyGlitch(imageData, glitchIntensity);
       ctx.putImageData(glitched, 0, 0);
     }
-    // Annars: ren video direkt från drawImage ovan
+    // Otherwise: clean video directly from drawImage above
 
     animationId = requestAnimationFrame(render);
   }
@@ -580,7 +580,7 @@ document.getElementById('base-glitch').addEventListener('input', (e) => {
 document.getElementById('csi-sensitivity').addEventListener('input', (e) => {
   settings.sensitivity = parseInt(e.target.value);
   document.getElementById('sensitivity-val').textContent = settings.sensitivity;
-  // Hog sensitivity = lag threshold (mer kanslig)
+  // High sensitivity = low threshold (more sensitive)
   // sensitivity 1 = threshold x2, sensitivity 20 = threshold x0.3
   const multiplier = 2.2 - (settings.sensitivity * 0.095);
   calibration.threshold = Math.max(0.3, calibration.baseThreshold * multiplier);

@@ -25,11 +25,11 @@ external_components:
 espectre:
   id: espectre_csi
 
-# WiFi - Hemmanätverk
+# WiFi - Home network
 wifi:
   ssid: "LIMINAL_VEIL"
   password: "whispered_frequency"
-  # Fallback AP om den inte kan ansluta
+  # Fallback AP if connection fails
   ap:
     ssid: "CSI-Node4-Fallback"
     password: "threshold_four"
@@ -40,7 +40,7 @@ captive_portal:
 logger:
   level: INFO
 
-# Home Assistant API (utan kryptering för enkel setup)
+# Home Assistant API (no encryption for easy setup)
 api:
 
 # OTA updates
@@ -48,6 +48,6 @@ ota:
   - platform: esphome
     password: "ethereal_passage"
 
-# Web server för direkt åtkomst
+# Web server for direct access
 web_server:
   port: 80
