@@ -2,7 +2,7 @@
 
 WiFi-reactive video installation. Movement distorts the image.
 
-Part of *in silico*, graduation project at Konstfack 2026.
+Part of *hard copy*, graduation project at Konstfack 2026.
 
 **Nadeschda Barenje** - [vetroal.se](https://vetroal.se)
 
