@@ -2,7 +2,7 @@
 
 WiFi-reactive video installation. Movement distorts the image.
 
-Part of *hard copy*, graduation project at Konstfack 2026.
+Part of *Hard Copy*, bachelor's degree project at Konstfack 2026.
 
 **Nadeschda Barenje** - [vetroal.se](https://vetroal.se)
 
