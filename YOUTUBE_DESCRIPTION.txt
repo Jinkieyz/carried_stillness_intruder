@@ -1,0 +1,21 @@
+Carried Stillness Intruder
+
+WiFi-reactive video installation using Channel State Information.
+
+A room looks empty. It is not. Between the walls, 2.4 GHz electromagnetic waves bounce, reflect, absorb. When someone moves, the pattern changes. This project makes it visible.
+
+The video responds to human presence detected through WiFi signal disturbances. Movement triggers CRT-like magnetic interference: the image bends, color channels separate, scanlines flicker. Stillness returns clarity.
+
+Part of "in silico", graduation project at Konstfack University of Arts, Crafts and Design, 2026.
+
+Technical: ESP32-C6 with ESPectre firmware, Sobel edge detection, WebGL CRT shaders.
+
+Music: Dopplereffekt - Cerebral (1995)
+
+Code: https://github.com/Jinkieyz/carried_stillness_intruder
+
+---
+
+Nadeschda Barenje
+Glass and Ceramics, Konstfack
+vetroal.se

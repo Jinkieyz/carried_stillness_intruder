@@ -21,3 +21,12 @@ venv/
 # Temporary
 *.tmp
 *.bak
+
+# Audio (not included in repo)
+*.mp3
+*.wav
+*.flac
+*.ogg
+
+# Video with audio (use videodemo.mp4 instead)
+*_with_audio.mp4
