@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Carried Stillness Intruder</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #000;
+  font-family: 'Courier New', monospace;
+  color: #0f0;
+  overflow: hidden;
+  height: 100vh;
+}
+
+.container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#status-bar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
+  border: 1px solid #0f0;
+  font-size: 12px;
+}
+
+#status-bar.hidden { display: none; }
+
+.status-line {
+  margin: 3px 0;
+}
+
+.motion { color: #f00; font-weight: bold; }
+.still { color: #0f0; }
+
+#video-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+#source-video {
+  display: none;
+}
+
+#glitch-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#controls {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 100;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
+  border: 1px solid #0f0;
+  font-size: 11px;
+}
+
+#controls.hidden { display: none; }
+
+.control-row {
+  margin: 5px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+input[type="range"] {
+  width: 100px;
+}
+
+input[type="file"] {
+  width: 150px;
+}
+
+button {
+  background: #0f0;
+  color: #000;
+  border: none;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button:hover {
+  background: #0a0;
+}
+
+#instructions {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  font-size: 18px;
+  color: #0f0;
+}
+
+#instructions.hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div id="status-bar">
+    <div class="status-line">CSI: <span id="csi-status">Connecting...</span></div>
+    <div class="status-line">Motion: <span id="motion-status" class="still">STILL</span></div>
+    <div class="status-line">Score: <span id="score-value">0.00</span></div>
+    <div class="status-line">Glitch: <span id="glitch-level">0%</span></div>
+    <div class="status-line" style="font-size:10px; color:#666">[H] UI  [C] Calibrate</div>
+  </div>
+
+  <div id="video-container">
+    <video id="source-video" loop muted></video>
+    <canvas id="glitch-canvas"></canvas>
+    <div id="instructions">
+      Drop video file here<br>
+      or click to select
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="control-row">
+      <label>Video:</label>
+      <input type="file" id="video-input" accept="video/*">
+    </div>
+    <div class="control-row">
+      <label>Base glitch:</label>
+      <input type="range" id="base-glitch" min="0" max="100" value="0">
+      <span id="base-glitch-val">0</span>
+    </div>
+    <div class="control-row">
+      <label>CSI sensitivity:</label>
+      <input type="range" id="csi-sensitivity" min="1" max="20" value="10">
+      <span id="sensitivity-val">10</span>
+    </div>
+    <div class="control-row">
+      <label>Speed react:</label>
+      <input type="checkbox" id="speed-react" checked>
+    </div>
+    <div class="control-row">
+      <label>Color shift:</label>
+      <input type="checkbox" id="color-react" checked>
+    </div>
+    <div class="control-row">
+      <button id="calibrate-btn">Calibrate</button>
+      <span id="calibrate-status" style="font-size:10px; color:#ff0;"></span>
+    </div>
+    <div class="control-row">
+      <label>Baseline:</label>
+      <span id="baseline-value" style="color:#0ff;">1.5</span>
+      <label style="margin-left:10px;">Thresh:</label>
+      <span id="threshold-value" style="color:#f0f;">+4.0</span>
+    </div>
+    <div class="control-row">
+      <button id="play-btn">Play</button>
+      <button id="fullscreen-btn">Fullscreen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Elements
+const video = document.getElementById('source-video');
+const canvas = document.getElementById('glitch-canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const instructions = document.getElementById('instructions');
+const statusBar = document.getElementById('status-bar');
+const controls = document.getElementById('controls');
+
+// State
+let csiData = { motion: false, score: 0, threshold: 9.6 };
+// Direct ESP32 connection - no bridge needed
+let animationId = null;
+
+// CALIBRATION - dynamisk baseline
+let calibration = {
+  baseline: 1.2,       // Default for nuvarande miljo
+  threshold: 0.5,      // Liten marginal - kansligare
+  baseThreshold: 0.5,
+  isCalibrating: false,
+  samples: [],
+  sampleCount: 60
+};
+let glitchIntensity = 0;
+let targetGlitch = 0;
+let lastFrameData = null;
+let frameBuffer = [];
+const MAX_BUFFER = 30;
+
+// SPATIAL ZONES - skalbart för fler noder
+// Med 1 nod: hela bilden
+// Med fler noder: dela upp i sektioner
+const zones = [
+  { id: 0, name: 'full', x: 0, y: 0, w: 1, h: 1, intensity: 0 }
+];
+
+// Aktuell glitch-intensitet (0-200)
+let currentGlitch = 0;
+
+// Settings
+const settings = {
+  baseGlitch: 5,
+  sensitivity: 10,
+  speedReact: true,
+  colorReact: true
+};
+
+// ============================================
+// DIRECT ESP32 CONNECTION
+// ============================================
+const ESP32_IP = 'PHANTOM_NODE_IP';  // ESP32 Node 4
+
+function connectCSI() {
+  document.getElementById('csi-status').textContent = 'Connecting...';
+
+  async function poll() {
+    try {
+      const r = await fetch(`http://${ESP32_IP}/sensor/movement_score`);
+      const data = await r.json();
+      csiData.score = data.value || 0;
+      csiData.motion = csiData.score > 13;
+      document.getElementById('csi-status').textContent = 'Connected';
+      document.getElementById('csi-status').style.color = '#0f0';
+      updateCSI();
+    } catch(e) {
+      document.getElementById('csi-status').textContent = 'ESP32 Offline';
+      document.getElementById('csi-status').style.color = '#f00';
+    }
+  }
+  setInterval(poll, 30);  // Snabbare polling for battre respons
+  poll();
+}
+
+// Gemensam UI-uppdatering
+function updateCSI() {
+  // Samla samples under kalibrering
+  if (calibration.isCalibrating) {
+    calibration.samples.push(csiData.score);
+    const progress = Math.round((calibration.samples.length / calibration.sampleCount) * 100);
+    document.getElementById('calibrate-status').textContent = `${progress}% - sitt stilla...`;
+
+    if (calibration.samples.length >= calibration.sampleCount) {
+      finishCalibration();
+    }
+    return;
+  }
+
+  const motionEl = document.getElementById('motion-status');
+  const triggerLevel = calibration.baseline + calibration.threshold;
+  csiData.motion = csiData.score > triggerLevel;
+
+  if (csiData.motion) {
+    motionEl.textContent = 'MOTION';
+    motionEl.className = 'motion';
+  } else {
+    motionEl.textContent = 'STILL';
+    motionEl.className = 'still';
+  }
+  document.getElementById('score-value').textContent = csiData.score.toFixed(2);
+
+  // Calculate target glitch - skalat for laga varden
+  const scoreAboveBaseline = Math.max(0, csiData.score - calibration.baseline);
+  if (scoreAboveBaseline > calibration.threshold) {
+    const normalizedScore = Math.min(scoreAboveBaseline / 2, 1);  // Full effekt vid +2
+    targetGlitch = 60 + normalizedScore * 140;
+  } else {
+    targetGlitch = 0;
+  }
+}
+
+// CALIBRATION FUNCTIONS
+function startCalibration() {
+  calibration.isCalibrating = true;
+  calibration.samples = [];
+  document.getElementById('calibrate-btn').disabled = true;
+  document.getElementById('calibrate-btn').textContent = 'Calibrating...';
+  document.getElementById('calibrate-status').textContent = 'Sitt stilla!';
+}
+
+function finishCalibration() {
+  calibration.isCalibrating = false;
+
+  // Räkna ut medelvärde
+  const sum = calibration.samples.reduce((a, b) => a + b, 0);
+  const mean = sum / calibration.samples.length;
+
+  // Räkna ut standardavvikelse för smart threshold
+  const variance = calibration.samples.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / calibration.samples.length;
+  const stdDev = Math.sqrt(variance);
+
+  // Sätt baseline och threshold (enkel: baseline + 4 som original)
+  calibration.baseline = mean;
+  calibration.baseThreshold = 4;
+  calibration.threshold = calibration.baseThreshold;
+
+  // Uppdatera UI
+  document.getElementById('baseline-value').textContent = calibration.baseline.toFixed(1);
+  document.getElementById('threshold-value').textContent = '+' + calibration.threshold.toFixed(1);
+  document.getElementById('calibrate-btn').disabled = false;
+  document.getElementById('calibrate-btn').textContent = 'Calibrate';
+  document.getElementById('calibrate-status').textContent = 'Done';
+
+  setTimeout(() => {
+    document.getElementById('calibrate-status').textContent = '';
+  }, 2000);
+
+  console.log(`Calibration done: baseline=${mean.toFixed(2)}, stdDev=${stdDev.toFixed(2)}, threshold=${calibration.threshold.toFixed(2)}`);
+}
+
+// Video file handling
+function handleVideoFile(file) {
+  const url = URL.createObjectURL(file);
+  video.src = url;
+  video.load();
+  instructions.classList.add('hidden');
+
+  video.onloadedmetadata = () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    video.play();
+    startGlitchLoop();
+  };
+}
+
+// Drag and drop
+document.body.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+});
+
+document.body.addEventListener('drop', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('video/')) {
+    handleVideoFile(file);
+  }
+});
+
+instructions.addEventListener('click', () => {
+  document.getElementById('video-input').click();
+});
+
+document.getElementById('video-input').addEventListener('change', (e) => {
+  if (e.target.files[0]) {
+    handleVideoFile(e.target.files[0]);
+  }
+});
+
+// CRT MAGNETISK STÖRNING MED AUTO-MASKER
+// Detekterar kanter i videon och applicerar störning på dem
+let time = 0;
+let edgeMask = null;
+
+// Sobel kantdetektering - hittar former i bilden
+function detectEdges(data, width, height) {
+  const gray = new Float32Array(width * height);
+  const edges = new Float32Array(width * height);
+
+  // Konvertera till gråskala
+  for (let i = 0; i < width * height; i++) {
+    const pi = i * 4;
+    gray[i] = (data[pi] * 0.299 + data[pi+1] * 0.587 + data[pi+2] * 0.114) / 255;
+  }
+
+  // Sobel operator
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+
+      // 3x3 Sobel kernels
+      const gx =
+        -gray[(y-1)*width+(x-1)] + gray[(y-1)*width+(x+1)] +
+        -2*gray[y*width+(x-1)] + 2*gray[y*width+(x+1)] +
+        -gray[(y+1)*width+(x-1)] + gray[(y+1)*width+(x+1)];
+
+      const gy =
+        -gray[(y-1)*width+(x-1)] - 2*gray[(y-1)*width+x] - gray[(y-1)*width+(x+1)] +
+        gray[(y+1)*width+(x-1)] + 2*gray[(y+1)*width+x] + gray[(y+1)*width+(x+1)];
+
+      edges[idx] = Math.min(1, Math.sqrt(gx*gx + gy*gy) * 2);
+    }
+  }
+
+  return edges;
+}
+
+function applyGlitch(imageData, intensity) {
+  if (intensity < 1) return imageData;
+
+  const data = imageData.data;
+  const width = imageData.width;
+  const height = imageData.height;
+  const power = Math.min(intensity / 60, 2);
+  time += 0.2;  // Snabbare animation
+
+  // Detektera kanter varje frame
+  edgeMask = detectEdges(data, width, height);
+
+  const output = new Uint8ClampedArray(data);
+
+  // Zon för spatial mapping
+  const zone = zones[0];
+  const cx = (zone.x + zone.w / 2) * width;
+  const cy = (zone.y + zone.h / 2) * height;
+  const zoneRadius = Math.min(zone.w * width, zone.h * height) * 0.7;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const ei = y * width + x;
+
+      // Avstånd från störningszon
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const zoneFalloff = Math.max(0, 1 - dist / zoneRadius);
+
+      // Kombinera: zon-position × kant-styrka
+      const edgeStrength = edgeMask[ei] || 0;
+      const localPower = power * zoneFalloff * (0.3 + edgeStrength * 0.7);
+
+      if (localPower > 0.02) {
+        // === MAGNETISK WARP LÄNGS KANTER ===
+        const angle = Math.atan2(dy, dx);
+        const warpAmt = localPower * 20 * (1 + edgeStrength);
+
+        // Vågor som följer kanterna
+        const wave1 = Math.sin(dist * 0.025 + time * 1.5) * warpAmt;
+        const wave2 = Math.sin(angle * 4 + time) * warpAmt * 0.4 * edgeStrength;
+
+        let srcX = x + Math.cos(angle + 1.57) * wave1 + wave2;
+        let srcY = y + Math.sin(angle + 1.57) * wave1 * 0.6;
+
+        srcX = Math.max(0, Math.min(width - 1, srcX));
+        srcY = Math.max(0, Math.min(height - 1, srcY));
+
+        const si = (Math.floor(srcY) * width + Math.floor(srcX)) * 4;
+
+        // === RGB SEPARATION - starkare på kanter ===
+        const chromaShift = Math.floor(localPower * 12 * (1 + edgeStrength));
+        const rX = Math.min(width - 1, Math.floor(srcX) + chromaShift);
+        const bX = Math.max(0, Math.floor(srcX) - chromaShift);
+        const gY = Math.min(height - 1, Math.floor(srcY) + Math.floor(chromaShift * 0.5));
+
+        const ri = (Math.floor(srcY) * width + rX) * 4;
+        const gi = (gY * width + Math.floor(srcX)) * 4;
+        const bi = (Math.floor(srcY) * width + bX) * 4;
+
+        output[i] = data[ri];
+        output[i + 1] = data[gi + 1];
+        output[i + 2] = data[bi + 2];
+
+        // === PHOSPHOR SCANLINES ===
+        const scanPhase = (y + Math.floor(time * 3)) % 3;
+        if (scanPhase === 0) {
+          output[i] *= (1 - localPower * 0.25);
+        } else if (scanPhase === 1) {
+          output[i + 1] *= (1 - localPower * 0.25);
+        } else {
+          output[i + 2] *= (1 - localPower * 0.25);
+        }
+
+        // === EDGE GLOW - kanter lyser ===
+        if (edgeStrength > 0.3) {
+          const glow = edgeStrength * localPower * 80;
+          output[i] = Math.min(255, output[i] + glow);
+          output[i + 1] = Math.min(255, output[i + 1] + glow * 0.8);
+          output[i + 2] = Math.min(255, output[i + 2] + glow * 0.6);
+        }
+
+        // === NOISE på kanter ===
+        if (edgeStrength > 0.2 && Math.random() < localPower * 0.15) {
+          const n = (Math.random() - 0.5) * 80;
+          output[i] = Math.max(0, Math.min(255, output[i] + n));
+          output[i + 1] = Math.max(0, Math.min(255, output[i + 1] + n));
+          output[i + 2] = Math.max(0, Math.min(255, output[i + 2] + n));
+        }
+
+      } else {
+        output[i] = data[i];
+        output[i + 1] = data[i + 1];
+        output[i + 2] = data[i + 2];
+      }
+      output[i + 3] = 255;
+    }
+  }
+
+  // === HORISONTELL TEARING i zonen ===
+  const tearLines = Math.floor(power * 5);
+  for (let t = 0; t < tearLines; t++) {
+    const ty = Math.floor(cy - zoneRadius * 0.4 + Math.random() * zoneRadius * 0.8);
+    if (ty >= 0 && ty < height) {
+      const tear = Math.floor(Math.sin(time * 4 + t * 2) * power * 30);
+      const tearStart = Math.floor(cx - zoneRadius * 0.5);
+      const tearEnd = Math.floor(cx + zoneRadius * 0.5);
+
+      for (let x = Math.max(0, tearStart); x < Math.min(width, tearEnd); x++) {
+        const srcX = ((x + tear) % width + width) % width;
+        const di = (ty * width + x) * 4;
+        const si = (ty * width + srcX) * 4;
+        output[di] = output[si];
+        output[di + 1] = output[si + 1];
+        output[di + 2] = output[si + 2];
+      }
+    }
+  }
+
+  for (let i = 0; i < data.length; i++) {
+    data[i] = output[i];
+  }
+
+  return imageData;
+}
+
+// Main render loop
+function startGlitchLoop() {
+  if (animationId) cancelAnimationFrame(animationId);
+
+  function render() {
+    if (video.paused || video.ended) {
+      animationId = requestAnimationFrame(render);
+      return;
+    }
+
+    // DIREKT STOPP när motion slutar
+    if (targetGlitch < 1) {
+      glitchIntensity = 0;
+      time = 0;
+      edgeMask = null;  // Reset mask
+    } else {
+      glitchIntensity = targetGlitch;
+    }
+    document.getElementById('glitch-level').textContent = Math.round(glitchIntensity) + '%';
+
+    // Speed control based on CSI
+    if (settings.speedReact) {
+      const speedFactor = csiData.motion ?
+        Math.max(0.3, 1 - (csiData.score / settings.sensitivity) * 0.7) : 1;
+      video.playbackRate = speedFactor;
+    }
+
+    // Draw video to canvas
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Apply glitch ENDAST om intensity > 0
+    if (glitchIntensity > 5) {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const glitched = applyGlitch(imageData, glitchIntensity);
+      ctx.putImageData(glitched, 0, 0);
+    }
+    // Annars: ren video direkt från drawImage ovan
+
+    animationId = requestAnimationFrame(render);
+  }
+
+  render();
+}
+
+// Controls
+document.getElementById('base-glitch').addEventListener('input', (e) => {
+  settings.baseGlitch = parseInt(e.target.value);
+  document.getElementById('base-glitch-val').textContent = settings.baseGlitch;
+});
+
+document.getElementById('csi-sensitivity').addEventListener('input', (e) => {
+  settings.sensitivity = parseInt(e.target.value);
+  document.getElementById('sensitivity-val').textContent = settings.sensitivity;
+  // Hog sensitivity = lag threshold (mer kanslig)
+  // sensitivity 1 = threshold x2, sensitivity 20 = threshold x0.3
+  const multiplier = 2.2 - (settings.sensitivity * 0.095);
+  calibration.threshold = Math.max(0.3, calibration.baseThreshold * multiplier);
+  document.getElementById('threshold-value').textContent = '+' + calibration.threshold.toFixed(1);
+});
+
+document.getElementById('speed-react').addEventListener('change', (e) => {
+  settings.speedReact = e.target.checked;
+  if (!e.target.checked) video.playbackRate = 1;
+});
+
+document.getElementById('color-react').addEventListener('change', (e) => {
+  settings.colorReact = e.target.checked;
+});
+
+document.getElementById('play-btn').addEventListener('click', () => {
+  if (video.paused) {
+    video.play();
+    document.getElementById('play-btn').textContent = 'Pause';
+  } else {
+    video.pause();
+    document.getElementById('play-btn').textContent = 'Play';
+  }
+});
+
+document.getElementById('fullscreen-btn').addEventListener('click', () => {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else {
+    document.documentElement.requestFullscreen();
+  }
+});
+
+document.getElementById('calibrate-btn').addEventListener('click', () => {
+  startCalibration();
+});
+
+// Toggle UI with H key, C for calibrate
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'h' || e.key === 'H') {
+    statusBar.classList.toggle('hidden');
+    controls.classList.toggle('hidden');
+  }
+  if (e.key === ' ') {
+    e.preventDefault();
+    document.getElementById('play-btn').click();
+  }
+  if ((e.key === 'c' || e.key === 'C') && !calibration.isCalibrating) {
+    startCalibration();
+  }
+});
+
+// Initialize
+connectCSI();
+</script>
+</body>
+</html>
