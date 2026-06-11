@@ -77,14 +77,14 @@ The ESP32 monitors WiFi signal strength. When you move between the router and th
 gui/index.html       <- main application
 espectre-node*.yaml  <- ESP32 configurations (edit WiFi here)
 media/               <- images and demo video
-SETUP.md             <- detailed hardware setup guide
-TECHNICAL.md         <- how the effects work
+SETUP.txt             <- detailed hardware setup guide
+TECHNICAL.txt         <- how the effects work
 ```
 
 ## Documentation
 
-- [SETUP.md](SETUP.md) - Hardware setup, flashing, troubleshooting
-- [TECHNICAL.md](TECHNICAL.md) - CSI theory, Sobel edge detection, CRT effects
+- [SETUP.txt](SETUP.txt) - Hardware setup, flashing, troubleshooting
+- [TECHNICAL.txt](TECHNICAL.txt) - CSI theory, Sobel edge detection, CRT effects
 
 ## Soundtrack
 
