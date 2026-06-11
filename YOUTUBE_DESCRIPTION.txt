@@ -6,7 +6,7 @@ A room looks empty. It is not. Between the walls, 2.4 GHz electromagnetic waves 
 
 The video responds to human presence detected through WiFi signal disturbances. Movement triggers CRT-like magnetic interference: the image bends, color channels separate, scanlines flicker. Stillness returns clarity.
 
-Part of "in silico", graduation project at Konstfack University of Arts, Crafts and Design, 2026.
+Part of "Hard Copy", graduation project at Konstfack University of Arts, Crafts and Design, 2026.
 
 Technical: ESP32-C6 with ESPectre firmware, Sobel edge detection, WebGL CRT shaders.
 
